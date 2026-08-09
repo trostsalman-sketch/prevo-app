@@ -7,10 +7,48 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))
 MINI_APP_URL = os.getenv("MINI_APP_URL", "")
 
-DB_PATH = "/opt/render/project/src/database.db"  # Render путь
+# Универсальный путь к базе данных
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "..", "backend", "database.db")
+
+# Создаем папку для базы, если её нет
+os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 def db():
     return sqlite3.connect(DB_PATH)
+
+def init_db():
+    """Создает таблицы, если их нет"""
+    conn = db()
+    c = conn.cursor()
+    
+    # Таблица пользователей
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            telegram_id INTEGER PRIMARY KEY,
+            username TEXT UNIQUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Таблица администраторов
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS admins (
+            telegram_id INTEGER PRIMARY KEY,
+            username TEXT,
+            role TEXT CHECK(role IN ('admin', 'creator'))
+        )
+    ''')
+    
+    # Добавляем создателя, если его нет
+    if ADMIN_CHAT_ID:
+        c.execute('''
+            INSERT OR IGNORE INTO admins (telegram_id, username, role)
+            VALUES (?, ?, 'creator')
+        ''', (ADMIN_CHAT_ID, 'creator'))
+    
+    conn.commit()
+    conn.close()
 
 def is_creator(telegram_id: int) -> bool:
     conn = db()
@@ -21,6 +59,16 @@ def is_creator(telegram_id: int) -> bool:
     return result is not None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Сохраняем пользователя в базу
+    conn = db()
+    c = conn.cursor()
+    c.execute('''
+        INSERT OR IGNORE INTO users (telegram_id, username)
+        VALUES (?, ?)
+    ''', (update.effective_user.id, update.effective_user.username or "unknown"))
+    conn.commit()
+    conn.close()
+    
     keyboard = [[KeyboardButton("Открыть приложение", web_app=WebAppInfo(url=MINI_APP_URL))]]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(
@@ -136,16 +184,15 @@ async def admlist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text)
 
 def main():
-    conn = db()
-    c = conn.cursor()
-    try:
-        c.execute("INSERT INTO admins (telegram_id, username, role) VALUES (?, ?, 'creator')",
-                  (ADMIN_CHAT_ID, 'creator'))
-        conn.commit()
-    except:
-        pass
-    conn.close()
+    # Инициализируем базу данных
+    init_db()
+    print(f"✅ База данных инициализирована: {DB_PATH}")
     
+    if not BOT_TOKEN:
+        print("❌ Ошибка: BOT_TOKEN не задан!")
+        return
+    
+    print("🤖 Бот запускается...")
     app = Application.builder().token(BOT_TOKEN).build()
     
     app.add_handler(CommandHandler("start", start))
@@ -155,6 +202,7 @@ def main():
     app.add_handler(CommandHandler("creator", creator_command))
     app.add_handler(CommandHandler("admlist", admlist_command))
     
+    print("✅ Бот готов к работе!")
     app.run_polling()
 
 if __name__ == "__main__":
