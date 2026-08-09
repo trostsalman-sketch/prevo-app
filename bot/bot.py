@@ -3,22 +3,24 @@ import sqlite3
 from telegram import Update, WebAppInfo, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))
-MINI_APP_URL = os.getenv("MINI_APP_URL", "")
+# ===== ЖЕСТКО ЗАШИТЫЕ ДАННЫЕ =====
+BOT_TOKEN = "8622607525:AAF1iK4in89aDzqtZpwxIGyjOdNXplAJnEg"
+ADMIN_CHAT_ID = 7740890917  # БЕЗ КАВЫЧЕК!
+MINI_APP_URL = "https://prevo-app.vercel.app"  # ПОМЕНЯЙ НА СВОЙ URL
+# =================================
 
-# Универсальный путь к базе данных
+# Путь к базе данных
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "..", "backend", "database.db")
+DB_PATH = os.path.join(BASE_DIR, "data", "bot.db")
 
-# Создаем папку для базы, если её нет
+# Создаем папку для базы
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 def db():
     return sqlite3.connect(DB_PATH)
 
 def init_db():
-    """Создает таблицы, если их нет"""
+    """Создает таблицы при первом запуске"""
     conn = db()
     c = conn.cursor()
     
@@ -26,7 +28,7 @@ def init_db():
     c.execute('''
         CREATE TABLE IF NOT EXISTS users (
             telegram_id INTEGER PRIMARY KEY,
-            username TEXT UNIQUE,
+            username TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
@@ -40,15 +42,17 @@ def init_db():
         )
     ''')
     
-    # Добавляем создателя, если его нет
+    # Добавляем создателя
     if ADMIN_CHAT_ID:
         c.execute('''
-            INSERT OR IGNORE INTO admins (telegram_id, username, role)
+            INSERT OR REPLACE INTO admins (telegram_id, username, role)
             VALUES (?, ?, 'creator')
         ''', (ADMIN_CHAT_ID, 'creator'))
+        print(f"👑 Создатель добавлен: {ADMIN_CHAT_ID}")
     
     conn.commit()
     conn.close()
+    print(f"✅ База данных создана: {DB_PATH}")
 
 def is_creator(telegram_id: int) -> bool:
     conn = db()
@@ -59,15 +63,18 @@ def is_creator(telegram_id: int) -> bool:
     return result is not None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Сохраняем пользователя в базу
-    conn = db()
-    c = conn.cursor()
-    c.execute('''
-        INSERT OR IGNORE INTO users (telegram_id, username)
-        VALUES (?, ?)
-    ''', (update.effective_user.id, update.effective_user.username or "unknown"))
-    conn.commit()
-    conn.close()
+    # Сохраняем пользователя
+    try:
+        conn = db()
+        c = conn.cursor()
+        c.execute('''
+            INSERT OR IGNORE INTO users (telegram_id, username)
+            VALUES (?, ?)
+        ''', (update.effective_user.id, update.effective_user.username or "unknown"))
+        conn.commit()
+        conn.close()
+    except:
+        pass
     
     keyboard = [[KeyboardButton("Открыть приложение", web_app=WebAppInfo(url=MINI_APP_URL))]]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -184,13 +191,13 @@ async def admlist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text)
 
 def main():
+    print("🚀 ЗАПУСК БОТА...")
+    print(f"🔑 ADMIN_CHAT_ID = {ADMIN_CHAT_ID}")
+    print(f"🤖 BOT_TOKEN = {BOT_TOKEN[:10]}...")
+    print(f"🌐 MINI_APP_URL = {MINI_APP_URL}")
+    
     # Инициализируем базу данных
     init_db()
-    print(f"✅ База данных инициализирована: {DB_PATH}")
-    
-    if not BOT_TOKEN:
-        print("❌ Ошибка: BOT_TOKEN не задан!")
-        return
     
     print("🤖 Бот запускается...")
     app = Application.builder().token(BOT_TOKEN).build()
@@ -202,7 +209,7 @@ def main():
     app.add_handler(CommandHandler("creator", creator_command))
     app.add_handler(CommandHandler("admlist", admlist_command))
     
-    print("✅ Бот готов к работе!")
+    print("✅ Бот готов к работе! Жду команды...")
     app.run_polling()
 
 if __name__ == "__main__":
